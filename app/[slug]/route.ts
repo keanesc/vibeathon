@@ -24,7 +24,7 @@ export async function GET(
     return NextResponse.json({ error: "Link not found" }, { status: 404 });
   }
 
-  if (!link.enabled) {
+  if (link.enabled === false) {
     return htmlPage(
       "Link Inactive",
       "This link has been disabled by its owner.",

@@ -8,8 +8,8 @@ export default defineSchema({
     slug: v.string(),
     originalUrl: v.string(),
     clicks: v.number(),
-    userId: v.id("users"),
-    enabled: v.boolean(),
+    userId: v.optional(v.id("users")),
+    enabled: v.optional(v.boolean()),
     clickLimit: v.optional(v.number()),
     lastAccessedAt: v.optional(v.number()),
   })
