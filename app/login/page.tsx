@@ -40,12 +40,9 @@ export default function LoginPage() {
     try {
       await signIn("password", { email: email.trim(), password, flow: tab });
       router.push("/");
-    } catch {
-      setError(
-        tab === "signIn"
-          ? "Invalid email or password."
-          : "Could not create account. The email may already be in use.",
-      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg || (tab === "signIn" ? "Invalid email or password." : "Could not create account."));
     } finally {
       setSubmitting(false);
     }
