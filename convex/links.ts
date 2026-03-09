@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { getAuthUserId } from "@convex-dev/auth/server";
 
 const ALPHABET =
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -13,18 +14,30 @@ function generateSlug(): string {
   return slug;
 }
 
+const linkValidator = v.object({
+  _id: v.id("links"),
+  _creationTime: v.number(),
+  slug: v.string(),
+  originalUrl: v.string(),
+  clicks: v.number(),
+  userId: v.id("users"),
+  enabled: v.boolean(),
+  clickLimit: v.optional(v.number()),
+  lastAccessedAt: v.optional(v.number()),
+});
+
 export const createLink = mutation({
   args: {
     originalUrl: v.string(),
+    clickLimit: v.optional(v.number()),
   },
-  returns: v.object({
-    _id: v.id("links"),
-    slug: v.string(),
-    originalUrl: v.string(),
-    clicks: v.number(),
-    _creationTime: v.number(),
-  }),
+  returns: linkValidator,
   handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      throw new Error("Must be logged in to create a link");
+    }
+
     // Generate a unique slug, retry on collision
     let slug = generateSlug();
     let attempts = 0;
@@ -42,6 +55,9 @@ export const createLink = mutation({
       slug,
       originalUrl: args.originalUrl,
       clicks: 0,
+      userId,
+      enabled: true,
+      clickLimit: args.clickLimit,
     });
 
     const doc = await ctx.db.get(id);
@@ -51,17 +67,17 @@ export const createLink = mutation({
 
 export const listLinks = query({
   args: {},
-  returns: v.array(
-    v.object({
-      _id: v.id("links"),
-      slug: v.string(),
-      originalUrl: v.string(),
-      clicks: v.number(),
-      _creationTime: v.number(),
-    }),
-  ),
+  returns: v.array(linkValidator),
   handler: async (ctx) => {
-    return await ctx.db.query("links").order("desc").collect();
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      return [];
+    }
+    return await ctx.db
+      .query("links")
+      .withIndex("by_userId", (q) => q.eq("userId", userId))
+      .order("desc")
+      .collect();
   },
 });
 
@@ -72,10 +88,14 @@ export const getLinkBySlug = query({
   returns: v.union(
     v.object({
       _id: v.id("links"),
+      _creationTime: v.number(),
       slug: v.string(),
       originalUrl: v.string(),
       clicks: v.number(),
-      _creationTime: v.number(),
+      userId: v.id("users"),
+      enabled: v.boolean(),
+      clickLimit: v.optional(v.number()),
+      lastAccessedAt: v.optional(v.number()),
     }),
     v.null(),
   ),
@@ -95,7 +115,49 @@ export const incrementClicks = mutation({
   handler: async (ctx, args) => {
     const link = await ctx.db.get(args.id);
     if (link === null) return null;
-    await ctx.db.patch(args.id, { clicks: link.clicks + 1 });
+    await ctx.db.patch(args.id, {
+      clicks: link.clicks + 1,
+      lastAccessedAt: Date.now(),
+    });
+    return null;
+  },
+});
+
+export const toggleEnabled = mutation({
+  args: {
+    id: v.id("links"),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      throw new Error("Must be logged in");
+    }
+    const link = await ctx.db.get(args.id);
+    if (link === null || link.userId !== userId) {
+      throw new Error("Link not found");
+    }
+    await ctx.db.patch(args.id, { enabled: !link.enabled });
+    return null;
+  },
+});
+
+export const updateDestination = mutation({
+  args: {
+    id: v.id("links"),
+    originalUrl: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) {
+      throw new Error("Must be logged in");
+    }
+    const link = await ctx.db.get(args.id);
+    if (link === null || link.userId !== userId) {
+      throw new Error("Link not found");
+    }
+    await ctx.db.patch(args.id, { originalUrl: args.originalUrl });
     return null;
   },
 });
